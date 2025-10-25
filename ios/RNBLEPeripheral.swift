@@ -52,6 +52,10 @@ class BLEPeripheral: RCTEventEmitter, CBPeripheralManagerDelegate {
         let permissionValue = CBAttributePermissions(rawValue: permissions)
         let byteData: Data = data.data(using: .utf8)!
         let characteristic = CBMutableCharacteristic( type: characteristicUUID, properties: propertyValue, value: byteData, permissions: permissionValue)
+        
+        if servicesMap[serviceUUID]?.characteristics == nil {
+            servicesMap[serviceUUID]?.characteristics = []
+        }
         servicesMap[serviceUUID]?.characteristics?.append(characteristic)
         print("added characteristic to service")
     }
@@ -79,15 +83,19 @@ class BLEPeripheral: RCTEventEmitter, CBPeripheralManagerDelegate {
     }
 
     @objc(sendNotificationToDevices:characteristicUUID:data:)
-    func sendNotificationToDevices(_ serviceUUID: String, characteristicUUID: String, data: Data) {
+    func sendNotificationToDevices(_ serviceUUID: String, characteristicUUID: String, data: String) {
         if(servicesMap.keys.contains(serviceUUID) == true){
             let service = servicesMap[serviceUUID]!
             let characteristic = getCharacteristicForService(service, characteristicUUID)
-            if (characteristic == nil) { alertJS("service \(serviceUUID) does NOT have characteristic \(characteristicUUID)") }
+            if (characteristic == nil) { 
+                alertJS("service \(serviceUUID) does NOT have characteristic \(characteristicUUID)")
+                return
+            }
 
             let char = characteristic as! CBMutableCharacteristic
-            char.value = data
-            let success = manager.updateValue( data, for: char, onSubscribedCentrals: nil)
+            let byteData = data.data(using: .utf8)!
+            char.value = byteData
+            let success = manager.updateValue(byteData, for: char, onSubscribedCentrals: nil)
             if (success){
                 print("changed data for characteristic \(characteristicUUID)")
             } else {

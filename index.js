@@ -1,3 +1,3 @@
-var BLEPeripheral = require('./BLEPeripheral');
+import BLEPeripheral from './BLEPeripheral';
 
-module.exports = BLEPeripheral;
+export default BLEPeripheral;

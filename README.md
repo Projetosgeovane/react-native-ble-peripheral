@@ -1,32 +1,45 @@
 # React Native BLE Peripheral
-Native BLE Peripheral in React Native
-## Welcome
 
-This is a simulator for a BLE peripheral, to help with testing BLE apps without an actual peripheral BLE device
-this project is not yet complete,
-for all ready parts see documentation below.
-(docs are not complete, feel free to improve them)
+A simulator for a BLE peripheral, to help with testing BLE apps without an actual peripheral BLE device.
 
-## Realease notes
-- fixed issues fixed on github repo in npm package - starting from version 1.2.0
-- **IOS support was added in version 2.0.0**
-- merged PR to fix write charicaristics - version 2.0.1
-    
-### Still missing
+## Features
 
-if you would like to contribute to this project or suggest more future features you're welcome to so via an issue or pull request.
+- ✅ Android support
+- ✅ iOS support (React Native 0.60+)
+- ✅ Create BLE services and characteristics
+- ✅ Start/stop advertising
+- ✅ Send notifications to connected devices
+- ✅ Handle read/write requests
 
-### IOS support
-right now this package does not support IOS, so any one that wants to help and contribute the IOS support is more than welcome
+## Requirements
+
+- React Native 0.60+
+- iOS 11.0+
+- Android API 21+
 
 
 ## Installation
 
+### React Native 0.60+
+
 ```bash
-npm install react-native-ble-peripheral --save
-or 
+npm install react-native-ble-peripheral
+# or
 yarn add react-native-ble-peripheral
 ```
+
+For iOS, run:
+```bash
+cd ios && pod install
+```
+
+### React Native < 0.60
+
+```bash
+npm install react-native-ble-peripheral
+react-native link react-native-ble-peripheral
+```
+
 npm page - https://www.npmjs.com/package/react-native-ble-peripheral
 ## Add permissions
 * In `AndroidManifest.xml` add:
@@ -88,7 +101,41 @@ public class MainActivity extends ReactActivity {
 #### Import
 
 ```javascript
-import BLEPeripheral from 'react-native-ble-peripheral'
+import BLEPeripheral from 'react-native-ble-peripheral';
+```
+
+#### Basic Example
+
+```javascript
+// Set device name
+BLEPeripheral.setName('My BLE Device');
+
+// Add a service
+BLEPeripheral.addService('12345678-1234-1234-1234-123456789ABC', true);
+
+// Add a characteristic to the service
+BLEPeripheral.addCharacteristicToService(
+  '12345678-1234-1234-1234-123456789ABC', // service UUID
+  '87654321-4321-4321-4321-CBA987654321', // characteristic UUID
+  2, // permissions (read)
+  2, // properties (read)
+  'Hello World' // initial data
+);
+
+// Start advertising
+BLEPeripheral.start().then(() => {
+  console.log('Started advertising');
+});
+
+// Stop advertising
+BLEPeripheral.stop();
+
+// Send notification
+BLEPeripheral.sendNotificationToDevices(
+  '12345678-1234-1234-1234-123456789ABC', // service UUID
+  '87654321-4321-4321-4321-CBA987654321', // characteristic UUID
+  'New data' // data to send
+);
 ```
 
 #### Add Service 
