@@ -63,7 +63,8 @@ class BLEPeripheral: RCTEventEmitter, CBPeripheralManagerDelegate {
     @objc func start(_ resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
         if (manager.state != .poweredOn) {
             alertJS("Bluetooth turned off")
-            return;
+            reject("BLUETOOTH_OFF", "Bluetooth is turned off", nil)
+            return
         }
         
         startPromiseResolve = resolve
@@ -76,19 +77,21 @@ class BLEPeripheral: RCTEventEmitter, CBPeripheralManagerDelegate {
         manager.startAdvertising(advertisementData)
     }
     
-    @objc func stop() {
+    @objc func stop(_ resolve: RCTPromiseResolveBlock, rejecter reject: RCTPromiseRejectBlock) {
         manager.stopAdvertising()
         advertising = false
         print("called stop")
+        resolve(true)
     }
 
     @objc(sendNotificationToDevices:characteristicUUID:data:)
-    func sendNotificationToDevices(_ serviceUUID: String, characteristicUUID: String, data: String) {
+    func sendNotificationToDevices(_ serviceUUID: String, characteristicUUID: String, data: String, resolve: RCTPromiseResolveBlock, rejecter reject: RCTPromiseRejectBlock) {
         if(servicesMap.keys.contains(serviceUUID) == true){
             let service = servicesMap[serviceUUID]!
             let characteristic = getCharacteristicForService(service, characteristicUUID)
             if (characteristic == nil) { 
                 alertJS("service \(serviceUUID) does NOT have characteristic \(characteristicUUID)")
+                reject("CHARACTERISTIC_NOT_FOUND", "Characteristic not found", nil)
                 return
             }
 
@@ -98,12 +101,15 @@ class BLEPeripheral: RCTEventEmitter, CBPeripheralManagerDelegate {
             let success = manager.updateValue(byteData, for: char, onSubscribedCentrals: nil)
             if (success){
                 print("changed data for characteristic \(characteristicUUID)")
+                resolve(true)
             } else {
                 alertJS("failed to send changed data for characteristic \(characteristicUUID)")
+                reject("SEND_FAILED", "Failed to send notification", nil)
             }
 
         } else {
             alertJS("service \(serviceUUID) does not exist")
+            reject("SERVICE_NOT_FOUND", "Service not found", nil)
         }
     }
     
@@ -237,6 +243,10 @@ class BLEPeripheral: RCTEventEmitter, CBPeripheralManagerDelegate {
     override func startObserving() { hasListeners = true }
     override func stopObserving() { hasListeners = false }
     @objc override static func requiresMainQueueSetup() -> Bool { return false }
+    
+    @objc override static func moduleName() -> String! {
+        return "BLEPeripheral"
+    }
     
 }
 

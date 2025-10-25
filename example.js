@@ -10,24 +10,35 @@ class BLEPeripheralExample {
 
   async setupBLE() {
     try {
+      console.log('BLEPeripheral module:', BLEPeripheral);
+      console.log('Available methods:', Object.keys(BLEPeripheral));
+
+      // Check if methods exist
+      if (typeof BLEPeripheral.setName !== 'function') {
+        throw new Error('setName method is not available');
+      }
+
       // Set device name
-      BLEPeripheral.setName('My BLE Device');
+      await BLEPeripheral.setName('My BLE Device');
+      console.log('✅ Device name set');
 
       // Add a primary service
-      BLEPeripheral.addService(this.serviceUUID, true);
+      await BLEPeripheral.addService(this.serviceUUID, true);
+      console.log('✅ Service added');
 
       // Add a characteristic with read and write permissions
-      BLEPeripheral.addCharacteristicToService(
+      await BLEPeripheral.addCharacteristicToService(
         this.serviceUUID,
         this.characteristicUUID,
         2 | 16, // read and write permissions
         2 | 8,  // read and write properties
         'Initial data'
       );
+      console.log('✅ Characteristic added');
 
       // Start advertising
       const result = await BLEPeripheral.start();
-      console.log('BLE advertising started:', result);
+      console.log('✅ BLE advertising started:', result);
 
       // Listen for events
       BLEPeripheral.addListener('onWarning', (warning) => {
@@ -35,7 +46,8 @@ class BLEPeripheralExample {
       });
 
     } catch (error) {
-      console.error('Error setting up BLE:', error);
+      console.error('❌ Error setting up BLE:', error);
+      throw error;
     }
   }
 
@@ -46,18 +58,20 @@ class BLEPeripheralExample {
         this.characteristicUUID,
         data
       );
-      console.log('Data sent:', data);
+      console.log('✅ Data sent:', data);
     } catch (error) {
-      console.error('Error sending data:', error);
+      console.error('❌ Error sending data:', error);
+      throw error;
     }
   }
 
   async stopBLE() {
     try {
       await BLEPeripheral.stop();
-      console.log('BLE advertising stopped');
+      console.log('✅ BLE advertising stopped');
     } catch (error) {
-      console.error('Error stopping BLE:', error);
+      console.error('❌ Error stopping BLE:', error);
+      throw error;
     }
   }
 
@@ -67,7 +81,7 @@ class BLEPeripheralExample {
       console.log('Is advertising:', isAdvertising);
       return isAdvertising;
     } catch (error) {
-      console.error('Error checking advertising status:', error);
+      console.error('❌ Error checking advertising status:', error);
       return false;
     }
   }
