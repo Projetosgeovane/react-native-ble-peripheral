@@ -13,6 +13,16 @@ class BLEPeripheral: RCTEventEmitter, CBPeripheralManagerDelegate {
     var startPromiseResolve: RCTPromiseResolveBlock?
     var startPromiseReject: RCTPromiseRejectBlock?
     
+    // Lock para evitar updates concorrentes
+    private var isUpdatingUUID: Bool = false
+    private let updateQueue = DispatchQueue(label: "com.bleperipheral.update")
+    
+    // Estado para gerenciar updates de UUID
+    private var pendingUUID: String?
+    private var pendingCharacteristics: [(uuid: String, permissions: UInt, properties: UInt, data: String)]?
+    private var pendingResolve: RCTPromiseResolveBlock?
+    private var pendingReject: RCTPromiseRejectBlock?
+    
     override init() {
         super.init()
         manager = CBPeripheralManager(delegate: self, queue: nil, options: nil)
@@ -35,14 +45,19 @@ class BLEPeripheral: RCTEventEmitter, CBPeripheralManagerDelegate {
     func addService(_ uuid: String, primary: Bool) {
         let serviceUUID = CBUUID(string: uuid)
         let service = CBMutableService(type: serviceUUID, primary: primary)
-        if(servicesMap.keys.contains(uuid) != true){
-            servicesMap[uuid] = service
-            manager.add(service)
-            print("added service \(uuid)")
+        
+        // Se já existe, remove o antigo antes de adicionar o novo
+        if servicesMap.keys.contains(uuid) {
+            print("⚠️ Service \(uuid) already exists, removing old one...")
+            if let oldService = servicesMap[uuid] {
+                servicesMap.removeValue(forKey: uuid)
+                manager.remove(oldService)
+            }
         }
-        else {
-            alertJS("service \(uuid) already there")
-        }
+        
+        servicesMap[uuid] = service
+        manager.add(service)
+        print("✅ Added service \(uuid)")
     }
     
     @objc(addCharacteristicToService:uuid:permissions:properties:data:)
@@ -129,6 +144,38 @@ class BLEPeripheral: RCTEventEmitter, CBPeripheralManagerDelegate {
             return
         }
         
+        // Lock para evitar updates concorrentes
+        updateQueue.sync {
+            if isUpdatingUUID {
+                print("⚠️ [UUID Update] Update já em progresso, sobrescrevendo...")
+                // Cancela o update anterior
+                pendingReject?("CANCELLED", "Update superseded by newer one", nil)
+            }
+            
+            isUpdatingUUID = true
+            pendingUUID = newUUID
+            pendingResolve = resolve
+            pendingReject = reject
+            
+            // Salvar characteristics antigas para recriar
+            var oldCharacteristics: [(uuid: String, permissions: UInt, properties: UInt, data: String)] = []
+            if let oldService = servicesMap.values.first {
+                for char in oldService.characteristics ?? [] {
+                    if let mutableChar = char as? CBMutableCharacteristic,
+                       let data = mutableChar.value,
+                       let dataString = String(data: data, encoding: .utf8) {
+                        oldCharacteristics.append((
+                            uuid: char.uuid.uuidString,
+                            permissions: mutableChar.permissions.rawValue,
+                            properties: mutableChar.properties.rawValue,
+                            data: dataString
+                        ))
+                    }
+                }
+            }
+            pendingCharacteristics = oldCharacteristics
+        }
+        
         print("📡 [UUID Update] Starting update to: \(newUUID)")
         
         // IMPORTANT: All CoreBluetooth operations MUST be on main thread
@@ -143,47 +190,127 @@ class BLEPeripheral: RCTEventEmitter, CBPeripheralManagerDelegate {
             self.advertising = false
             print("🛑 [UUID Update] Advertising stopped")
             
-            // Small delay using DispatchQueue instead of Thread.sleep
+            // Delay para garantir que advertising parou
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                 // Step 2: Remove all services
                 self.manager.removeAllServices()
-                print("🗑️ [UUID Update] Services removed")
+                self.servicesMap.removeAll()
+                print("🗑️ [UUID Update] Services removed and map cleared")
                 
-                // Small delay before adding new service
+                // Delay para garantir que services foram removidos
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                    // Step 3: Clear and rebuild services map
-                    let oldServicesMap = self.servicesMap
-                    self.servicesMap.removeAll()
-                    
-                    // Create new service with updated UUID
+                    // Step 3: Criar novo service SEM characteristics
+                    // Characteristics serão adicionadas no didAdd callback
                     let newServiceUUID = CBUUID(string: newUUID)
                     let newService = CBMutableService(type: newServiceUUID, primary: true)
                     
-                    // Preserve characteristics from old service
-                    if let oldService = oldServicesMap.values.first {
-                        newService.characteristics = oldService.characteristics
-                        print("📋 [UUID Update] Characteristics preserved: \(oldService.characteristics?.count ?? 0)")
+                    // Service será vazio, characteristics serão adicionadas depois
+                    self.servicesMap[newUUID] = newService
+                    self.manager.add(newService)
+                    print("➕ [UUID Update] New service added (waiting for didAdd callback)")
+                    // didAdd callback vai adicionar characteristics e reiniciar advertising
+                }
+            }
+        }
+    }
+    
+    @objc func updateServiceUUIDSeamless(_ newUUID: String, resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
+        // Validações
+        let testUUID = CBUUID(string: newUUID)
+        if testUUID.uuidString == "00000000-0000-0000-0000-000000000000" {
+            let errorMsg = "Invalid UUID format: \(newUUID)"
+            print("❌ \(errorMsg)")
+            reject("INVALID_UUID", errorMsg, nil)
+            return
+        }
+        
+        if !advertising {
+            let errorMsg = "Cannot update UUID: not advertising"
+            print("⚠️ \(errorMsg)")
+            reject("NOT_ADVERTISING", errorMsg, nil)
+            return
+        }
+        
+        if manager.state != .poweredOn {
+            let errorMsg = "Bluetooth is not powered on (state: \(manager.state.rawValue))"
+            print("⚠️ \(errorMsg)")
+            reject("BLUETOOTH_OFF", errorMsg, nil)
+            return
+        }
+        
+        // Se já está atualizando, usar a função normal
+        if isUpdatingUUID {
+            print("⚠️ [UUID Update Seamless] Update in progress, using normal update...")
+            updateServiceUUID(newUUID, resolve: resolve, rejecter: reject)
+            return
+        }
+        
+        print("📡 [UUID Update Seamless] Starting seamless update to: \(newUUID)")
+        
+        // Lock para evitar updates concorrentes
+        updateQueue.sync {
+            isUpdatingUUID = true
+            pendingUUID = newUUID
+            pendingResolve = resolve
+            pendingReject = reject
+            
+            // Salvar characteristics antigas
+            var oldCharacteristics: [(uuid: String, permissions: UInt, properties: UInt, data: String)] = []
+            if let oldService = servicesMap.values.first {
+                for char in oldService.characteristics ?? [] {
+                    if let mutableChar = char as? CBMutableCharacteristic,
+                       let data = mutableChar.value,
+                       let dataString = String(data: data, encoding: .utf8) {
+                        oldCharacteristics.append((
+                            uuid: char.uuid.uuidString,
+                            permissions: mutableChar.permissions.rawValue,
+                            properties: mutableChar.properties.rawValue,
+                            data: dataString
+                        ))
                     }
+                }
+            }
+            pendingCharacteristics = oldCharacteristics
+        }
+        
+        // Executar na main thread com delays mínimos para ser "seamless"
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else {
+                reject("DEALLOCATED", "BLEPeripheral was deallocated", nil)
+                return
+            }
+            
+            // Step 1: Stop advertising
+            self.manager.stopAdvertising()
+            self.advertising = false
+            print("🛑 [UUID Seamless] Advertising stopped")
+            
+            // Delay mínimo
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                // Step 2: Remove services
+                self.manager.removeAllServices()
+                self.servicesMap.removeAll()
+                print("🗑️ [UUID Seamless] Services removed")
+                
+                // Delay mínimo
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    // Step 3: Criar novo service
+                    let newServiceUUID = CBUUID(string: newUUID)
+                    let newService = CBMutableService(type: newServiceUUID, primary: true)
                     
                     self.servicesMap[newUUID] = newService
                     self.manager.add(newService)
-                    print("➕ [UUID Update] New service added with UUID: \(newUUID)")
+                    print("➕ [UUID Seamless] New service added")
                     
-                    // Small delay before restarting advertising
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        // Step 4: Restart advertising
+                    // Delay mínimo antes de reiniciar
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                         let advertisementData: [String: Any] = [
                             CBAdvertisementDataLocalNameKey: self.name,
                             CBAdvertisementDataServiceUUIDsKey: self.getServiceUUIDArray()
                         ]
                         
                         self.manager.startAdvertising(advertisementData)
-                        self.advertising = true
-                        print("✅ [UUID Update] Advertising restarted")
-                        print("✅ [UUID Update] Complete! New UUID: \(newUUID)")
-                        
-                        // Resolve
-                        resolve(true)
+                        print("📡 [UUID Seamless] Advertising restart triggered")
                     }
                 }
             }
@@ -271,9 +398,74 @@ class BLEPeripheral: RCTEventEmitter, CBPeripheralManagerDelegate {
     func peripheralManager(_ peripheral: CBPeripheralManager, didAdd service: CBService, error: Error?) {
         if let error = error {
             alertJS("error: \(error)")
+            
+            // Se estava esperando UUID update, falhou
+            if isUpdatingUUID {
+                updateQueue.sync {
+                    pendingReject?("SERVICE_ADD_ERROR", "Failed to add service: \(error.localizedDescription)", error)
+                    pendingResolve = nil
+                    pendingReject = nil
+                    isUpdatingUUID = false
+                }
+            }
             return
         }
-        print("service: \(service)")
+        
+        print("✅ [Service Added] Service: \(service.uuid)")
+        
+        // Se estava esperando UUID update, adicionar characteristics e reiniciar advertising
+        if isUpdatingUUID, let newUUID = pendingUUID, let characteristics = pendingCharacteristics {
+            print("📋 [UUID Update] Recreating \(characteristics.count) characteristics...")
+            
+            guard let newService = servicesMap[newUUID] else {
+                print("❌ [UUID Update] New service not found in map")
+                updateQueue.sync {
+                    pendingReject?("SERVICE_NOT_FOUND", "Service not found in map", nil)
+                    pendingResolve = nil
+                    pendingReject = nil
+                    isUpdatingUUID = false
+                }
+                return
+            }
+            
+            // Limpar characteristics antigas (se houver)
+            newService.characteristics = []
+            
+            // Adicionar características recriadas
+            for charData in characteristics {
+                let charUUID = CBUUID(string: charData.uuid)
+                let properties = CBCharacteristicProperties(rawValue: charData.properties)
+                let permissions = CBAttributePermissions(rawValue: charData.permissions)
+                let data = charData.data.data(using: .utf8) ?? Data()
+                
+                let newChar = CBMutableCharacteristic(
+                    type: charUUID,
+                    properties: properties,
+                    value: data,
+                    permissions: permissions
+                )
+                
+                if newService.characteristics == nil {
+                    newService.characteristics = []
+                }
+                newService.characteristics?.append(newChar)
+                print("➕ [UUID Update] Recreated characteristic: \(charData.uuid)")
+            }
+            
+            // Reiniciar advertising com novo UUID
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                let advertisementData: [String: Any] = [
+                    CBAdvertisementDataLocalNameKey: self.name,
+                    CBAdvertisementDataServiceUUIDsKey: self.getServiceUUIDArray()
+                ]
+                
+                print("📡 [UUID Update] Restarting advertising with new UUID: \(newUUID)")
+                self.manager.startAdvertising(advertisementData)
+                // didStartAdvertising vai resolver a promise quando advertising iniciar
+            }
+        } else {
+            print("ℹ️ [Service Added] Normal service add (not UUID update)")
+        }
     }
 
     // Bluetooth status changed
@@ -294,6 +486,18 @@ class BLEPeripheral: RCTEventEmitter, CBPeripheralManagerDelegate {
             print("❌ [Advertising] \(errorMsg)")
             alertJS(errorMsg)
             advertising = false
+            
+            // Se era UUID update, rejeitar
+            if isUpdatingUUID {
+                updateQueue.sync {
+                    pendingReject?("ADVERTISING_FAILED", errorMsg, error)
+                    pendingResolve = nil
+                    pendingReject = nil
+                    isUpdatingUUID = false
+                }
+                return
+            }
+            
             startPromiseReject?("AD_ERR", errorMsg, error as NSError)
             startPromiseReject = nil
             startPromiseResolve = nil
@@ -302,6 +506,21 @@ class BLEPeripheral: RCTEventEmitter, CBPeripheralManagerDelegate {
         
         advertising = true
         print("✅ [Advertising] Started successfully!")
+        
+        // Se era UUID update, resolver a promise
+        if isUpdatingUUID {
+            updateQueue.sync {
+                if let uuid = pendingUUID {
+                    print("✅ [UUID Update] Complete! New UUID: \(uuid)")
+                }
+                pendingResolve?(true)
+                pendingResolve = nil
+                pendingReject = nil
+                isUpdatingUUID = false
+            }
+            return
+        }
+        
         startPromiseResolve?(true)
         startPromiseResolve = nil
         startPromiseReject = nil

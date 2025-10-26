@@ -11,6 +11,7 @@ RCT_EXTERN_METHOD(addCharacteristicToService:(NSString *)serviceUUID uuid:(NSStr
 RCT_EXTERN_METHOD(start:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject)
 RCT_EXTERN_METHOD(stop:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject)
 RCT_EXTERN_METHOD(updateServiceUUID:(NSString *)newUUID resolve:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject)
+RCT_EXTERN_METHOD(updateServiceUUIDSeamless:(NSString *)newUUID resolve:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject)
 RCT_EXTERN_METHOD(sendNotificationToDevices:(NSString *)serviceUUID characteristicUUID:(NSString *)characteristicUUID data:(NSString *)data resolve:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject)
 
 @end

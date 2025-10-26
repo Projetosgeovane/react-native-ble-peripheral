@@ -91,6 +91,13 @@ class BLEPeripheralManager {
     return this.module.updateServiceUUID(newUUID);
   }
 
+  updateServiceUUIDSeamless(newUUID) {
+    if (typeof newUUID !== 'string') {
+      return Promise.reject(new Error('UUID must be a string'));
+    }
+    return this.module.updateServiceUUIDSeamless(newUUID);
+  }
+
   sendNotificationToDevices(serviceUUID, characteristicUUID, data) {
     if (typeof serviceUUID !== 'string') {
       return Promise.reject(new Error('Service UUID must be a string'));
