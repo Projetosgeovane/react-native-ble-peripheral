@@ -66,20 +66,34 @@ class BLEPeripheral: RCTEventEmitter, CBPeripheralManagerDelegate {
     }
     
     @objc func start(_ resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
-        if (manager.state != .poweredOn) {
-            alertJS("Bluetooth turned off")
-            reject("BLUETOOTH_OFF", "Bluetooth is turned off", nil)
+        // Check Bluetooth state
+        if manager.state != .poweredOn {
+            let errorMsg = "Bluetooth is turned off (state: \(manager.state.rawValue))"
+            print("⚠️ [Start] \(errorMsg)")
+            alertJS(errorMsg)
+            reject("BLUETOOTH_OFF", errorMsg, nil)
             return
         }
+        
+        // Check if already advertising
+        if advertising {
+            print("⚠️ [Start] Already advertising, ignoring start request")
+            resolve(true)
+            return
+        }
+        
+        print("📡 [Start] Starting advertising...")
         
         startPromiseResolve = resolve
         startPromiseReject = reject
 
-        let advertisementData = [
+        let advertisementData: [String: Any] = [
             CBAdvertisementDataLocalNameKey: name,
             CBAdvertisementDataServiceUUIDsKey: getServiceUUIDArray()
-            ] as [String : Any]
+        ]
+        
         manager.startAdvertising(advertisementData)
+        print("📡 [Start] Advertising data sent to manager")
     }
     
     @objc func stop(_ resolve: RCTPromiseResolveBlock, rejecter reject: RCTPromiseRejectBlock) {
@@ -89,51 +103,99 @@ class BLEPeripheral: RCTEventEmitter, CBPeripheralManagerDelegate {
         resolve(true)
     }
     
-    @objc func updateServiceUUID(_ newUUID: String) {
+    @objc func updateServiceUUID(_ newUUID: String, resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
         // Validate UUID format
-        guard CBUUID(string: newUUID).uuidString != "00000000-0000-0000-0000-000000000000" else {
-            alertJS("Invalid UUID format: \(newUUID)")
+        let testUUID = CBUUID(string: newUUID)
+        if testUUID.uuidString == "00000000-0000-0000-0000-000000000000" {
+            let errorMsg = "Invalid UUID format: \(newUUID)"
+            print("❌ \(errorMsg)")
+            reject("INVALID_UUID", errorMsg, nil)
             return
         }
         
         // Check if advertising is active
         if !advertising {
-            alertJS("Cannot update UUID: not advertising")
+            let errorMsg = "Cannot update UUID: not advertising"
+            print("⚠️ \(errorMsg)")
+            reject("NOT_ADVERTISING", errorMsg, nil)
             return
         }
         
-        print("Updating service UUID to: \(newUUID)")
-        
-        // Stop advertising temporarily
-        manager.stopAdvertising()
-        
-        // Remove all existing services
-        manager.removeAllServices()
-        
-        // Clear the services map
-        let oldServicesMap = servicesMap
-        servicesMap.removeAll()
-        
-        // Create and add new service with the same characteristics from the old one
-        let newServiceUUID = CBUUID(string: newUUID)
-        let newService = CBMutableService(type: newServiceUUID, primary: true)
-        
-        // Try to preserve characteristics from the old service
-        if let oldService = oldServicesMap.values.first {
-            newService.characteristics = oldService.characteristics
+        // Check Bluetooth state
+        if manager.state != .poweredOn {
+            let errorMsg = "Bluetooth is not powered on (state: \(manager.state.rawValue))"
+            print("⚠️ \(errorMsg)")
+            reject("BLUETOOTH_OFF", errorMsg, nil)
+            return
         }
         
-        servicesMap[newUUID] = newService
-        manager.add(newService)
+        print("📡 [UUID Update] Starting update to: \(newUUID)")
         
-        // Restart advertising with new UUID
-        let advertisementData = [
-            CBAdvertisementDataLocalNameKey: name,
-            CBAdvertisementDataServiceUUIDsKey: getServiceUUIDArray()
-            ] as [String : Any]
-        manager.startAdvertising(advertisementData)
-        
-        print("Service UUID updated to: \(newUUID)")
+        // Perform update in background queue to avoid blocking
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else {
+                reject("DEALLOCATED", "BLEPeripheral was deallocated", nil)
+                return
+            }
+            
+            // Step 1: Stop advertising
+            DispatchQueue.main.async {
+                self.manager.stopAdvertising()
+                self.advertising = false
+                print("🛑 [UUID Update] Advertising stopped")
+            }
+            
+            // Wait for advertising to stop
+            Thread.sleep(forTimeInterval: 0.2)
+            
+            // Step 2: Remove all services
+            DispatchQueue.main.async {
+                self.manager.removeAllServices()
+                print("🗑️ [UUID Update] Services removed")
+            }
+            
+            // Wait for services to be removed
+            Thread.sleep(forTimeInterval: 0.2)
+            
+            // Step 3: Clear and rebuild services map
+            DispatchQueue.main.async {
+                let oldServicesMap = self.servicesMap
+                self.servicesMap.removeAll()
+                
+                // Create new service with updated UUID
+                let newServiceUUID = CBUUID(string: newUUID)
+                let newService = CBMutableService(type: newServiceUUID, primary: true)
+                
+                // Preserve characteristics from old service
+                if let oldService = oldServicesMap.values.first {
+                    newService.characteristics = oldService.characteristics
+                    print("📋 [UUID Update] Characteristics preserved: \(oldService.characteristics?.count ?? 0)")
+                }
+                
+                self.servicesMap[newUUID] = newService
+                self.manager.add(newService)
+                print("➕ [UUID Update] New service added with UUID: \(newUUID)")
+            }
+            
+            // Wait for service to be added
+            Thread.sleep(forTimeInterval: 0.3)
+            
+            // Step 4: Restart advertising
+            DispatchQueue.main.async {
+                let advertisementData: [String: Any] = [
+                    CBAdvertisementDataLocalNameKey: self.name,
+                    CBAdvertisementDataServiceUUIDsKey: self.getServiceUUIDArray()
+                ]
+                
+                self.manager.startAdvertising(advertisementData)
+                self.advertising = true
+                print("✅ [UUID Update] Advertising restarted")
+                print("✅ [UUID Update] Complete! New UUID: \(newUUID)")
+                
+                // Resolve on main thread
+                resolve(true)
+            }
+        }
     }
 
     @objc(sendNotificationToDevices:characteristicUUID:data:resolve:rejecter:)
@@ -236,14 +298,21 @@ class BLEPeripheral: RCTEventEmitter, CBPeripheralManagerDelegate {
     // Advertising started
     func peripheralManagerDidStartAdvertising(_ peripheral: CBPeripheralManager, error: Error?) {
         if let error = error {
-            alertJS("advertising failed. error: \(error)")
+            let errorMsg = "Advertising failed: \(error.localizedDescription)"
+            print("❌ [Advertising] \(errorMsg)")
+            alertJS(errorMsg)
             advertising = false
-            startPromiseReject?("AD_ERR", "advertising failed", error)
+            startPromiseReject?("AD_ERR", errorMsg, error as NSError)
+            startPromiseReject = nil
+            startPromiseResolve = nil
             return
         }
+        
         advertising = true
-        startPromiseResolve?(advertising)
-        print("advertising succeeded!")
+        print("✅ [Advertising] Started successfully!")
+        startPromiseResolve?(true)
+        startPromiseResolve = nil
+        startPromiseReject = nil
     }
     
     //// HELPERS

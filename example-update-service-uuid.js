@@ -44,11 +44,26 @@ const initBLEPeripheral = async () => {
     await BLEPeripheral.start();
     console.log('Advertising iniciado!');
 
+    // Função para atualizar UUID com Promise
+    const updateUUIDPromise = async () => {
+      try {
+        const timestamp = Math.floor(Date.now() / 1000);
+        const timestampHex = timestamp.toString(16).padStart(8, '0').toUpperCase();
+        const newUUID = `${BASE_UUID}${timestampHex}`;
+
+        console.log(`Atualizando UUID para: ${newUUID}`);
+        await BLEPeripheral.updateServiceUUID(newUUID);
+        console.log(`✅ UUID atualizado com sucesso! (${newUUID})`);
+      } catch (error) {
+        console.error('❌ Erro ao atualizar UUID:', error);
+      }
+    };
+
     // Atualizar UUID a cada 30 segundos
-    setInterval(updateServiceUUIDWithTimestamp, 30000);
+    setInterval(updateUUIDPromise, 30000);
 
     // Primeira atualização após 5 segundos
-    setTimeout(updateServiceUUIDWithTimestamp, 5000);
+    setTimeout(updateUUIDPromise, 5000);
 
     // Exemplo: Enviar notificação aos dispositivos
     setInterval(() => {
