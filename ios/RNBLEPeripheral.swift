@@ -88,6 +88,53 @@ class BLEPeripheral: RCTEventEmitter, CBPeripheralManagerDelegate {
         print("called stop")
         resolve(true)
     }
+    
+    @objc func updateServiceUUID(_ newUUID: String) {
+        // Validate UUID format
+        guard CBUUID(string: newUUID).uuidString != "00000000-0000-0000-0000-000000000000" else {
+            alertJS("Invalid UUID format: \(newUUID)")
+            return
+        }
+        
+        // Check if advertising is active
+        if !advertising {
+            alertJS("Cannot update UUID: not advertising")
+            return
+        }
+        
+        print("Updating service UUID to: \(newUUID)")
+        
+        // Stop advertising temporarily
+        manager.stopAdvertising()
+        
+        // Remove all existing services
+        manager.removeAllServices()
+        
+        // Clear the services map
+        let oldServicesMap = servicesMap
+        servicesMap.removeAll()
+        
+        // Create and add new service with the same characteristics from the old one
+        let newServiceUUID = CBUUID(string: newUUID)
+        let newService = CBMutableService(type: newServiceUUID, primary: true)
+        
+        // Try to preserve characteristics from the old service
+        if let oldService = oldServicesMap.values.first {
+            newService.characteristics = oldService.characteristics
+        }
+        
+        servicesMap[newUUID] = newService
+        manager.add(newService)
+        
+        // Restart advertising with new UUID
+        let advertisementData = [
+            CBAdvertisementDataLocalNameKey: name,
+            CBAdvertisementDataServiceUUIDsKey: getServiceUUIDArray()
+            ] as [String : Any]
+        manager.startAdvertising(advertisementData)
+        
+        print("Service UUID updated to: \(newUUID)")
+    }
 
     @objc(sendNotificationToDevices:characteristicUUID:data:resolve:rejecter:)
     func sendNotificationToDevices(_ serviceUUID: String, characteristicUUID: String, data: String, resolve: RCTPromiseResolveBlock, rejecter reject: RCTPromiseRejectBlock) {
