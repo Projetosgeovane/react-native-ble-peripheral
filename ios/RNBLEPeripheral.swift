@@ -131,69 +131,61 @@ class BLEPeripheral: RCTEventEmitter, CBPeripheralManagerDelegate {
         
         print("📡 [UUID Update] Starting update to: \(newUUID)")
         
-        // Perform update in background queue to avoid blocking
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+        // IMPORTANT: All CoreBluetooth operations MUST be on main thread
+        DispatchQueue.main.async { [weak self] in
             guard let self = self else {
                 reject("DEALLOCATED", "BLEPeripheral was deallocated", nil)
                 return
             }
             
             // Step 1: Stop advertising
-            DispatchQueue.main.async {
-                self.manager.stopAdvertising()
-                self.advertising = false
-                print("🛑 [UUID Update] Advertising stopped")
-            }
+            self.manager.stopAdvertising()
+            self.advertising = false
+            print("🛑 [UUID Update] Advertising stopped")
             
-            // Wait for advertising to stop
-            Thread.sleep(forTimeInterval: 0.2)
-            
-            // Step 2: Remove all services
-            DispatchQueue.main.async {
+            // Small delay using DispatchQueue instead of Thread.sleep
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                // Step 2: Remove all services
                 self.manager.removeAllServices()
                 print("🗑️ [UUID Update] Services removed")
-            }
-            
-            // Wait for services to be removed
-            Thread.sleep(forTimeInterval: 0.2)
-            
-            // Step 3: Clear and rebuild services map
-            DispatchQueue.main.async {
-                let oldServicesMap = self.servicesMap
-                self.servicesMap.removeAll()
                 
-                // Create new service with updated UUID
-                let newServiceUUID = CBUUID(string: newUUID)
-                let newService = CBMutableService(type: newServiceUUID, primary: true)
-                
-                // Preserve characteristics from old service
-                if let oldService = oldServicesMap.values.first {
-                    newService.characteristics = oldService.characteristics
-                    print("📋 [UUID Update] Characteristics preserved: \(oldService.characteristics?.count ?? 0)")
+                // Small delay before adding new service
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    // Step 3: Clear and rebuild services map
+                    let oldServicesMap = self.servicesMap
+                    self.servicesMap.removeAll()
+                    
+                    // Create new service with updated UUID
+                    let newServiceUUID = CBUUID(string: newUUID)
+                    let newService = CBMutableService(type: newServiceUUID, primary: true)
+                    
+                    // Preserve characteristics from old service
+                    if let oldService = oldServicesMap.values.first {
+                        newService.characteristics = oldService.characteristics
+                        print("📋 [UUID Update] Characteristics preserved: \(oldService.characteristics?.count ?? 0)")
+                    }
+                    
+                    self.servicesMap[newUUID] = newService
+                    self.manager.add(newService)
+                    print("➕ [UUID Update] New service added with UUID: \(newUUID)")
+                    
+                    // Small delay before restarting advertising
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        // Step 4: Restart advertising
+                        let advertisementData: [String: Any] = [
+                            CBAdvertisementDataLocalNameKey: self.name,
+                            CBAdvertisementDataServiceUUIDsKey: self.getServiceUUIDArray()
+                        ]
+                        
+                        self.manager.startAdvertising(advertisementData)
+                        self.advertising = true
+                        print("✅ [UUID Update] Advertising restarted")
+                        print("✅ [UUID Update] Complete! New UUID: \(newUUID)")
+                        
+                        // Resolve
+                        resolve(true)
+                    }
                 }
-                
-                self.servicesMap[newUUID] = newService
-                self.manager.add(newService)
-                print("➕ [UUID Update] New service added with UUID: \(newUUID)")
-            }
-            
-            // Wait for service to be added
-            Thread.sleep(forTimeInterval: 0.3)
-            
-            // Step 4: Restart advertising
-            DispatchQueue.main.async {
-                let advertisementData: [String: Any] = [
-                    CBAdvertisementDataLocalNameKey: self.name,
-                    CBAdvertisementDataServiceUUIDsKey: self.getServiceUUIDArray()
-                ]
-                
-                self.manager.startAdvertising(advertisementData)
-                self.advertising = true
-                print("✅ [UUID Update] Advertising restarted")
-                print("✅ [UUID Update] Complete! New UUID: \(newUUID)")
-                
-                // Resolve on main thread
-                resolve(true)
             }
         }
     }
