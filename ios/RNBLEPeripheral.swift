@@ -43,21 +43,30 @@ class BLEPeripheral: RCTEventEmitter, CBPeripheralManagerDelegate {
     
     @objc(addService:primary:)
     func addService(_ uuid: String, primary: Bool) {
-        let serviceUUID = CBUUID(string: uuid)
-        let service = CBMutableService(type: serviceUUID, primary: primary)
-        
-        // Se já existe, remove o antigo antes de adicionar o novo
-        if servicesMap.keys.contains(uuid) {
-            print("⚠️ Service \(uuid) already exists, removing old one...")
-            if let oldService = servicesMap[uuid] {
-                servicesMap.removeValue(forKey: uuid)
-                manager.remove(oldService)
+        // CRITICAL FIX: All CoreBluetooth operations MUST be on main thread to prevent crashes
+        // The crash occurs because manager.add() and manager.remove() are called from background threads
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else {
+                print("❌ BLEPeripheral was deallocated")
+                return
             }
+            
+            let serviceUUID = CBUUID(string: uuid)
+            let service = CBMutableService(type: serviceUUID, primary: primary)
+            
+            // Se já existe, remove o antigo antes de adicionar o novo
+            if self.servicesMap.keys.contains(uuid) {
+                print("⚠️ Service \(uuid) already exists, removing old one...")
+                if let oldService = self.servicesMap[uuid] {
+                    self.servicesMap.removeValue(forKey: uuid)
+                    self.manager.remove(oldService)
+                }
+            }
+            
+            self.servicesMap[uuid] = service
+            self.manager.add(service)
+            print("✅ Added service \(uuid)")
         }
-        
-        servicesMap[uuid] = service
-        manager.add(service)
-        print("✅ Added service \(uuid)")
     }
     
     @objc(addCharacteristicToService:uuid:permissions:properties:data:)
