@@ -213,17 +213,34 @@ class BLEPeripheral: RCTEventEmitter, CBPeripheralManagerDelegate {
                     return 
                 }
                 
-                // Step 2: Remove all services
-                self.manager.removeAllServices()
-                self.servicesMap.removeAll()
-                print("🗑️ [UUID Update] Services removed and map cleared")
-                
-                // Delay maior para garantir limpeza completa
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                    guard let self = self else { 
-                        print("⚠️ [UUID Update] Self deallocated, aborting")
-                        return 
+                // Step 2: Remove all services de forma segura
+                // Primeiro tentar remover services individuais de forma segura
+                let servicesToRemove = Array(self.servicesMap.values)
+                for service in servicesToRemove {
+                    // Apenas remover se o UUID for válido
+                    let uuidString = service.uuid.uuidString
+                    if !uuidString.isEmpty && uuidString != "00000000-0000-0000-0000-000000000000" {
+                        print("🗑️ [UUID Update] Removing service: \(uuidString)")
+                        self.manager.remove(service)
+                    } else {
+                        print("⚠️ [UUID Update] Skipping invalid service UUID")
                     }
+                }
+                
+                // Aguardar um pouco para garantir que os removes foram processados
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                    guard let self = self else { return }
+                    
+                    // Limpar o map
+                    self.servicesMap.removeAll()
+                    print("✅ [UUID Update] Services removed and map cleared")
+                    
+                    // Delay maior para garantir limpeza completa antes de criar novo service
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                        guard let self = self else { 
+                            print("⚠️ [UUID Update] Self deallocated, aborting")
+                            return 
+                        }
                     
                     // Step 3: Criar novo service COM characteristics diretamente
                     let newServiceUUID = CBUUID(string: newUUID)
