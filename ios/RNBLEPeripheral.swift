@@ -186,39 +186,43 @@ class BLEPeripheral: RCTEventEmitter, CBPeripheralManagerDelegate {
         
         // IMPORTANT: All CoreBluetooth operations MUST be on main thread
         DispatchQueue.main.async { [weak self] in
-            guard let strongSelf = self else {
-                updateQueue.sync {
-                    self?.isUpdatingUUID = false
-                }
+            guard let self = self else {
+                // Se self foi deallocated, apenas rejeitar
                 reject("DEALLOCATED", "BLEPeripheral was deallocated", nil)
                 return
             }
             
             // Step 1: Stop advertising
-            strongSelf.manager.stopAdvertising()
-            strongSelf.advertising = false
+            self.manager.stopAdvertising()
+            self.advertising = false
             print("🛑 [UUID Update] Advertising stopped")
             
             // Delay para garantir que advertising parou
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
-                guard let strongSelf = self else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                guard let self = self else { 
+                    print("⚠️ [UUID Update] Self deallocated, aborting")
+                    return 
+                }
                 
                 // Step 2: Remove all services
-                strongSelf.manager.removeAllServices()
-                strongSelf.servicesMap.removeAll()
+                self.manager.removeAllServices()
+                self.servicesMap.removeAll()
                 print("🗑️ [UUID Update] Services removed and map cleared")
                 
                 // Delay para garantir que services foram removidos
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
-                    guard let strongSelf = self else { return }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                    guard let self = self else { 
+                        print("⚠️ [UUID Update] Self deallocated, aborting")
+                        return 
+                    }
                     
                     // Step 3: Criar novo service SEM characteristics
                     let newServiceUUID = CBUUID(string: newUUID)
                     let newService = CBMutableService(type: newServiceUUID, primary: true)
                     
                     // Service será vazio, characteristics serão adicionadas depois
-                    strongSelf.servicesMap[newUUID] = newService
-                    strongSelf.manager.add(newService)
+                    self.servicesMap[newUUID] = newService
+                    self.manager.add(newService)
                     print("➕ [UUID Update] New service added (waiting for didAdd callback)")
                 }
             }
@@ -434,15 +438,15 @@ class BLEPeripheral: RCTEventEmitter, CBPeripheralManagerDelegate {
             print("📋 [UUID Update] Recreating \(characteristics.count) characteristics...")
             
             DispatchQueue.main.async { [weak self] in
-                guard let strongSelf = self else { return }
+                guard let self = self else { return }
                 
-                guard let newService = strongSelf.servicesMap[newUUID] else {
+                guard let newService = self.servicesMap[newUUID] else {
                     print("❌ [UUID Update] New service not found in map")
-                    strongSelf.updateQueue.sync {
-                        strongSelf.pendingReject?("SERVICE_NOT_FOUND", "Service not found in map", nil)
-                        strongSelf.pendingResolve = nil
-                        strongSelf.pendingReject = nil
-                        strongSelf.isUpdatingUUID = false
+                    self.updateQueue.sync {
+                        self.pendingReject?("SERVICE_NOT_FOUND", "Service not found in map", nil)
+                        self.pendingResolve = nil
+                        self.pendingReject = nil
+                        self.isUpdatingUUID = false
                     }
                     return
                 }
@@ -473,15 +477,15 @@ class BLEPeripheral: RCTEventEmitter, CBPeripheralManagerDelegate {
                 
                 // Reiniciar advertising com novo UUID
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-                    guard let strongSelf = self else { return }
+                    guard let self = self else { return }
                     
                     let advertisementData: [String: Any] = [
-                        CBAdvertisementDataLocalNameKey: strongSelf.name,
-                        CBAdvertisementDataServiceUUIDsKey: strongSelf.getServiceUUIDArray()
+                        CBAdvertisementDataLocalNameKey: self.name,
+                        CBAdvertisementDataServiceUUIDsKey: self.getServiceUUIDArray()
                     ]
                     
                     print("📡 [UUID Update] Restarting advertising with new UUID: \(newUUID)")
-                    strongSelf.manager.startAdvertising(advertisementData)
+                    self.manager.startAdvertising(advertisementData)
                 }
             }
         }
