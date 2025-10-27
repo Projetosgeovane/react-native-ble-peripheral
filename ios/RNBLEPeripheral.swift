@@ -241,58 +241,59 @@ class BLEPeripheral: RCTEventEmitter, CBPeripheralManagerDelegate {
                             print("⚠️ [UUID Update] Self deallocated, aborting")
                             return 
                         }
-                    
-                    // Step 3: Criar novo service COM characteristics diretamente
-                    let newServiceUUID = CBUUID(string: newUUID)
-                    let newService = CBMutableService(type: newServiceUUID, primary: true)
-                    
-                    // Adicionar characteristics diretamente SEM esperar callback
-                    var newCharacteristics: [CBMutableCharacteristic] = []
-                    for charData in oldCharacteristics {
-                        let charUUID = CBUUID(string: charData.uuid)
-                        let properties = CBCharacteristicProperties(rawValue: charData.properties)
-                        let permissions = CBAttributePermissions(rawValue: charData.permissions)
-                        let data = charData.data.data(using: .utf8) ?? Data()
                         
-                        let newChar = CBMutableCharacteristic(
-                            type: charUUID,
-                            properties: properties,
-                            value: data,
-                            permissions: permissions
-                        )
-                        newCharacteristics.append(newChar)
-                        print("➕ [UUID Update] Created characteristic: \(charData.uuid)")
-                    }
-                    
-                    newService.characteristics = newCharacteristics
-                    self.servicesMap[newUUID] = newService
-                    self.manager.add(newService)
-                    print("➕ [UUID Update] New service added with UUID: \(newUUID)")
-                    
-                    // Delay antes de reiniciar advertising
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
-                        guard let self = self else { return }
+                        // Step 3: Criar novo service COM characteristics diretamente
+                        let newServiceUUID = CBUUID(string: newUUID)
+                        let newService = CBMutableService(type: newServiceUUID, primary: true)
                         
-                        let advertisementData: [String: Any] = [
-                            CBAdvertisementDataLocalNameKey: self.name,
-                            CBAdvertisementDataServiceUUIDsKey: self.getServiceUUIDArray()
-                        ]
-                        
-                        print("📡 [UUID Update] Restarting advertising with new UUID: \(newUUID)")
-                        self.manager.startAdvertising(advertisementData)
-                        
-                        // Não esperar callback, resolver direto
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-                            guard let self = self else { return }
-                            self.advertising = true
-                            print("✅ [UUID Update] Complete! New UUID: \(newUUID)")
+                        // Adicionar characteristics diretamente SEM esperar callback
+                        var newCharacteristics: [CBMutableCharacteristic] = []
+                        for charData in oldCharacteristics {
+                            let charUUID = CBUUID(string: charData.uuid)
+                            let properties = CBCharacteristicProperties(rawValue: charData.properties)
+                            let permissions = CBAttributePermissions(rawValue: charData.permissions)
+                            let data = charData.data.data(using: .utf8) ?? Data()
                             
-                            // Resolver promise
-                            updateQueue.sync {
-                                self.pendingResolve?(true)
-                                self.pendingResolve = nil
-                                self.pendingReject = nil
-                                self.isUpdatingUUID = false
+                            let newChar = CBMutableCharacteristic(
+                                type: charUUID,
+                                properties: properties,
+                                value: data,
+                                permissions: permissions
+                            )
+                            newCharacteristics.append(newChar)
+                            print("➕ [UUID Update] Created characteristic: \(charData.uuid)")
+                        }
+                        
+                        newService.characteristics = newCharacteristics
+                        self.servicesMap[newUUID] = newService
+                        self.manager.add(newService)
+                        print("➕ [UUID Update] New service added with UUID: \(newUUID)")
+                        
+                        // Delay antes de reiniciar advertising
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+                            guard let self = self else { return }
+                            
+                            let advertisementData: [String: Any] = [
+                                CBAdvertisementDataLocalNameKey: self.name,
+                                CBAdvertisementDataServiceUUIDsKey: self.getServiceUUIDArray()
+                            ]
+                            
+                            print("📡 [UUID Update] Restarting advertising with new UUID: \(newUUID)")
+                            self.manager.startAdvertising(advertisementData)
+                            
+                            // Não esperar callback, resolver direto
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                                guard let self = self else { return }
+                                self.advertising = true
+                                print("✅ [UUID Update] Complete! New UUID: \(newUUID)")
+                                
+                                // Resolver promise
+                                updateQueue.sync {
+                                    self.pendingResolve?(true)
+                                    self.pendingResolve = nil
+                                    self.pendingReject = nil
+                                    self.isUpdatingUUID = false
+                                }
                             }
                         }
                     }
