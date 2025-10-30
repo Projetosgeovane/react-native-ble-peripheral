@@ -213,22 +213,12 @@ class BLEPeripheral: RCTEventEmitter, CBPeripheralManagerDelegate {
                     return 
                 }
                 
-                // Step 2: Remove all services de forma segura
-                // Primeiro tentar remover services individuais de forma segura
-                let servicesToRemove = Array(self.servicesMap.values)
-                for service in servicesToRemove {
-                    // Apenas remover se o UUID for válido
-                    let uuidString = service.uuid.uuidString
-                    if !uuidString.isEmpty && uuidString != "00000000-0000-0000-0000-000000000000" {
-                        print("🗑️ [UUID Update] Removing service: \(uuidString)")
-                        self.manager.remove(service)
-                    } else {
-                        print("⚠️ [UUID Update] Skipping invalid service UUID")
-                    }
-                }
-                
-                // Aguardar um pouco para garantir que os removes foram processados
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                // Step 2: Remove all services (mais seguro que remover individualmente)
+                print("🗑️ [UUID Update] Calling removeAllServices()")
+                self.manager.removeAllServices()
+
+                // Aguardar para garantir que o CoreBluetooth processou a remoção
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
                     guard let self = self else { return }
                     
                     // Limpar o map
