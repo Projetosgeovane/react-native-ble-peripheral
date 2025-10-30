@@ -84,6 +84,11 @@ class BLEPeripheralManager {
     return this.module.stop();
   }
 
+  // NEW: stop advertising without removing services
+  stopAdvertisingOnly() {
+    return this.module.stopAdvertisingOnly();
+  }
+
   updateServiceUUID(newUUID) {
     if (typeof newUUID !== 'string') {
       return Promise.reject(new Error('UUID must be a string'));
@@ -96,6 +101,29 @@ class BLEPeripheralManager {
       return Promise.reject(new Error('UUID must be a string'));
     }
     return this.module.updateServiceUUIDSeamless(newUUID);
+  }
+
+  // NEW: remove a single service by UUID
+  removeService(uuid) {
+    if (typeof uuid !== 'string') {
+      return Promise.reject(new Error('UUID must be a string'));
+    }
+    return this.module.removeService(uuid);
+  }
+
+  // NEW: remove all services
+  removeAllServices() {
+    return this.module.removeAllServices();
+  }
+
+  // NEW: get current service UUIDs as array of strings
+  getServiceUUIDs() {
+    return this.module.getServiceUUIDs();
+  }
+
+  // NEW: get current services metadata
+  getCurrentServices() {
+    return this.module.getCurrentServices();
   }
 
   sendNotificationToDevices(serviceUUID, characteristicUUID, data) {
