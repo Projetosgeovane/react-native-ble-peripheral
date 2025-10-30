@@ -221,33 +221,9 @@ class BLEPeripheral: RCTEventEmitter, CBPeripheralManagerDelegate {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
                     guard let self = self else { return }
                     
-                    // NOVO: Verificar se serviços foram realmente removidos
-                    let servicesAfterRemoval = self.manager.services ?? []
-                    if !servicesAfterRemoval.isEmpty {
-                        print("⚠️ [UUID Update] Ainda há \(servicesAfterRemoval.count) serviços, aguardando mais...")
-                        // Aguardar mais tempo e tentar novamente
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-                            guard let self = self else { return }
-                            
-                            let stillRemaining = self.manager.services ?? []
-                            if !stillRemaining.isEmpty {
-                                print("❌ [UUID Update] ERRO: Serviços ainda presentes após 2s")
-                                self.updateQueue.sync {
-                                    self.pendingReject?("SERVICES_NOT_REMOVED", "Failed to remove services", nil)
-                                    self.pendingResolve = nil
-                                    self.pendingReject = nil
-                                    self.isUpdatingUUID = false
-                                }
-                                return
-                            }
-                            
-                            // Continuar com criação do serviço
-                            self.criarNovoServico(newUUID, oldCharacteristics)
-                        }
-                        return
-                    }
-                    
-                    print("✅ [UUID Update] Services removed and map cleared")
+                    // Sem acesso público à lista interna de serviços do CBPeripheralManager.
+                    // Após removeAllServices() e limpar servicesMap, seguimos com os delays planejados.
+                    print("✅ [UUID Update] removeAllServices() called and servicesMap cleared")
                     
                     // CORREÇÃO: Aumentar delay de 0.3s para 0.8s
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
@@ -292,33 +268,7 @@ class BLEPeripheral: RCTEventEmitter, CBPeripheralManagerDelegate {
         self.manager.add(newService)
         print("➕ [UUID Update] New service added with UUID: \(newUUID)")
         
-        // CORREÇÃO: Aumentar delay de 0.4s para 1.0s
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-            guard let self = self else { return }
-            
-            let advertisementData: [String: Any] = [
-                CBAdvertisementDataLocalNameKey: self.name,
-                CBAdvertisementDataServiceUUIDsKey: self.getServiceUUIDArray()
-            ]
-            
-            print("📡 [UUID Update] Restarting advertising with new UUID: \(newUUID)")
-            self.manager.startAdvertising(advertisementData)
-            
-            // CORREÇÃO: Aumentar delay de 0.3s para 0.8s
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
-                guard let self = self else { return }
-                self.advertising = true
-                print("✅ [UUID Update] Complete! New UUID: \(newUUID)")
-                
-                // Resolver promise
-                self.updateQueue.sync {
-                    self.pendingResolve?(true)
-                    self.pendingResolve = nil
-                    self.pendingReject = nil
-                    self.isUpdatingUUID = false
-                }
-            }
-        }
+        // Advertising será reiniciado em didAdd(service:) quando o serviço novo for confirmado
     }
     
     @objc func updateServiceUUIDSeamless(_ newUUID: String, resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
@@ -516,7 +466,31 @@ class BLEPeripheral: RCTEventEmitter, CBPeripheralManagerDelegate {
         }
         
         print("✅ [Service Added] Service: \(service.uuid)")
-        // Service já foi criado com characteristics no updateServiceUUID, não precisa fazer nada aqui
+        // Reiniciar advertising somente após confirmação de que o serviço foi adicionado
+        if isUpdatingUUID {
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                let advertisementData: [String: Any] = [
+                    CBAdvertisementDataLocalNameKey: self.name,
+                    CBAdvertisementDataServiceUUIDsKey: self.getServiceUUIDArray()
+                ]
+                print("📡 [UUID Update] Restarting advertising after service added: \(service.uuid)")
+                self.manager.startAdvertising(advertisementData)
+
+                // Pequeno delay para estabilidade antes de resolver
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+                    guard let self = self else { return }
+                    self.advertising = true
+                    print("✅ [UUID Update] Complete! Now advertising: \(service.uuid)")
+                    self.updateQueue.sync {
+                        self.pendingResolve?(true)
+                        self.pendingResolve = nil
+                        self.pendingReject = nil
+                        self.isUpdatingUUID = false
+                    }
+                }
+            }
+        }
     }
 
     // Bluetooth status changed
