@@ -71,37 +71,37 @@ class BLEPeripheral: RCTEventEmitter, CBPeripheralManagerDelegate {
     }
 
     // Retorna a lista de UUIDs dos serviços atuais (strings)
-    @objc(getServiceUUIDs:rejecter:)
-    func getServiceUUIDs(_ resolve: RCTPromiseResolveBlock, rejecter reject: RCTPromiseRejectBlock) {
-        let uuids = getServiceUUIDArray().map { $0.uuidString }
-        print("📄 [getServiceUUIDs] \(uuids)")
-        resolve(uuids)
-    }
+   @objc(getServiceUUIDs:rejecter:)
+func getServiceUUIDs(_ resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
+    let uuids = getServiceUUIDArray().map { $0.uuidString }
+    print("📄 [getServiceUUIDs] \(uuids)")
+    resolve(uuids)
+}
 
-    // Retorna array de dicionários com uuid e primary
-    @objc(getCurrentServices:rejecter:)
-    func getCurrentServices(_ resolve: RCTPromiseResolveBlock, rejecter reject: RCTPromiseRejectBlock) {
-        var arr: [[String: Any]] = []
-        for (_, service) in servicesMap {
-            arr.append([
-                "uuid": service.uuid.uuidString,
-                "primary": service.isPrimary
-            ])
-        }
-        print("📄 [getCurrentServices] count=\(arr.count)")
-        resolve(arr)
+// ✅ MÉTODO 4: getCurrentServices (ADICIONE @escaping)
+@objc(getCurrentServices:rejecter:)
+func getCurrentServices(_ resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
+    var arr: [[String: Any]] = []
+    for (_, service) in servicesMap {
+        arr.append([
+            "uuid": service.uuid.uuidString,
+            "primary": service.isPrimary
+        ])
     }
+    print("📄 [getCurrentServices] count=\(arr.count)")
+    resolve(arr)
+}
 
-    // Para o advertising sem remover serviços
-    @objc func stopAdvertisingOnly(_ resolve: RCTPromiseResolveBlock, rejecter reject: RCTPromiseRejectBlock) {
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            print("🛑 [stopAdvertisingOnly] Stopping advertising (services kept)")
-            self.manager.stopAdvertising()
-            self.advertising = false
-            resolve(true)
-        }
+// ✅ MÉTODO 5: stopAdvertisingOnly (ADICIONE @escaping)
+@objc func stopAdvertisingOnly(_ resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
+    DispatchQueue.main.async { [weak self] in
+        guard let self = self else { return }
+        print("🛑 [stopAdvertisingOnly] Stopping advertising (services kept)")
+        self.manager.stopAdvertising()
+        self.advertising = false
+        resolve(true)
     }
+}
     
     @objc func isAdvertising(_ resolve: RCTPromiseResolveBlock, rejecter reject: RCTPromiseRejectBlock) {
         resolve(advertising)
