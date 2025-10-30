@@ -39,6 +39,69 @@ class BLEPeripheral: RCTEventEmitter, CBPeripheralManagerDelegate {
         self.name = name
         print("name set to \(name)")
     }
+
+    // Remove um serviço específico pelo UUID sem parar o advertising
+    @objc(removeService:resolve:rejecter:)
+    func removeService(_ uuid: String, resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            let normalized = CBUUID(string: uuid).uuidString
+            guard let service = self.servicesMap[normalized] ?? self.servicesMap[uuid] else {
+                print("⚠️ [removeService] Service not found: \(uuid)")
+                resolve(false)
+                return
+            }
+            print("🗑️ [removeService] Removing service: \(service.uuid.uuidString)")
+            self.servicesMap.removeValue(forKey: normalized)
+            self.servicesMap.removeValue(forKey: uuid)
+            self.manager.remove(service)
+            resolve(true)
+        }
+    }
+
+    // Remove todos os serviços sem parar o advertising
+    @objc func removeAllServices(_ resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            print("🗑️ [removeAllServices] Removing ALL services")
+            self.manager.removeAllServices()
+            self.servicesMap.removeAll()
+            resolve(true)
+        }
+    }
+
+    // Retorna a lista de UUIDs dos serviços atuais (strings)
+    @objc(getServiceUUIDs:rejecter:)
+    func getServiceUUIDs(_ resolve: RCTPromiseResolveBlock, rejecter reject: RCTPromiseRejectBlock) {
+        let uuids = getServiceUUIDArray().map { $0.uuidString }
+        print("📄 [getServiceUUIDs] \(uuids)")
+        resolve(uuids)
+    }
+
+    // Retorna array de dicionários com uuid e primary
+    @objc(getCurrentServices:rejecter:)
+    func getCurrentServices(_ resolve: RCTPromiseResolveBlock, rejecter reject: RCTPromiseRejectBlock) {
+        var arr: [[String: Any]] = []
+        for (_, service) in servicesMap {
+            arr.append([
+                "uuid": service.uuid.uuidString,
+                "primary": service.isPrimary
+            ])
+        }
+        print("📄 [getCurrentServices] count=\(arr.count)")
+        resolve(arr)
+    }
+
+    // Para o advertising sem remover serviços
+    @objc func stopAdvertisingOnly(_ resolve: RCTPromiseResolveBlock, rejecter reject: RCTPromiseRejectBlock) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            print("🛑 [stopAdvertisingOnly] Stopping advertising (services kept)")
+            self.manager.stopAdvertising()
+            self.advertising = false
+            resolve(true)
+        }
+    }
     
     @objc func isAdvertising(_ resolve: RCTPromiseResolveBlock, rejecter reject: RCTPromiseRejectBlock) {
         resolve(advertising)

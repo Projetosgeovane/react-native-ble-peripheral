@@ -14,4 +14,9 @@ RCT_EXTERN_METHOD(updateServiceUUID:(NSString *)newUUID resolve:(RCTPromiseResol
 RCT_EXTERN_METHOD(updateServiceUUIDSeamless:(NSString *)newUUID resolve:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject)
 RCT_EXTERN_METHOD(sendNotificationToDevices:(NSString *)serviceUUID characteristicUUID:(NSString *)characteristicUUID data:(NSString *)data resolve:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject)
 
+RCT_EXTERN_METHOD(removeService:(NSString *)uuid resolve:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject)
+RCT_EXTERN_METHOD(removeAllServices:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject)
+RCT_EXTERN_METHOD(getServiceUUIDs:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject)
+RCT_EXTERN_METHOD(getCurrentServices:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject)
+RCT_EXTERN_METHOD(stopAdvertisingOnly:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject)
 @end
