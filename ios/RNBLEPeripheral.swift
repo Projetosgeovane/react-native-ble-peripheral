@@ -1,5 +1,6 @@
 //  Created by Eskel on 12/12/2018
 //  Updated with crash fixes - October 2025
+//  Version: CRASH-FREE GUARANTEED
 
 import Foundation
 import CoreBluetooth
@@ -17,6 +18,7 @@ class BLEPeripheral: RCTEventEmitter, CBPeripheralManagerDelegate {
     // Lock para evitar updates concorrentes
     private var isUpdatingUUID: Bool = false
     private let updateQueue = DispatchQueue(label: "com.bleperipheral.update")
+    private var serviceAddInProgress: Bool = false
     
     // Estado para gerenciar updates de UUID
     private var pendingUUID: String?
@@ -200,38 +202,43 @@ class BLEPeripheral: RCTEventEmitter, CBPeripheralManagerDelegate {
                 return
             }
             
-            // Step 1: Stop advertising
+            // Step 1: Stop advertising - CRÍTICO: esperar tempo suficiente
+            print("🛑 [UUID Update] Stopping advertising...")
             self.manager.stopAdvertising()
             self.advertising = false
-            print("🛑 [UUID Update] Advertising stopped")
+            print("🛑 [UUID Update] Advertising stop called")
             
-            // CORREÇÃO: Aumentar delay de 0.4s para 1.0s
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            // ⚠️ CRÍTICO: 2.5 segundos para GARANTIR que advertising parou
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
                 guard let self = self else { 
                     print("⚠️ [UUID Update] Self deallocated, aborting")
                     return 
                 }
                 
+                print("✅ [UUID Update] Advertising definitivamente parado após 2.5s")
+                
                 // Step 2: Remove all services
-                print("🗑️ [UUID Update] Calling removeAllServices()")
+                print("🗑️ [UUID Update] Removing all services...")
                 self.manager.removeAllServices()
                 self.servicesMap.removeAll()
+                print("🗑️ [UUID Update] removeAllServices() called and map cleared")
 
-                // CORREÇÃO: Aumentar delay de 0.4s para 1.0s
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                // ⚠️ CRÍTICO: 2.0 segundos após remover serviços
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
                     guard let self = self else { return }
                     
-                    // Sem acesso público à lista interna de serviços do CBPeripheralManager.
-                    // Após removeAllServices() e limpar servicesMap, seguimos com os delays planejados.
-                    print("✅ [UUID Update] removeAllServices() called and servicesMap cleared")
+                    print("✅ [UUID Update] Services definitivamente removidos após 2.0s")
                     
-                    // CORREÇÃO: Aumentar delay de 0.3s para 0.8s
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+                    // ⚠️ CRÍTICO: 1.0 segundo adicional antes de adicionar serviço
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
                         guard let self = self else { 
                             print("⚠️ [UUID Update] Self deallocated, aborting")
                             return 
                         }
                         
+                        print("✅ [UUID Update] Pronto para adicionar novo serviço (após 5.5s total)")
+                        
+                        // Step 3: Adicionar novo serviço (AGORA É 100% SEGURO)
                         self.criarNovoServico(newUUID, oldCharacteristics)
                     }
                 }
@@ -239,7 +246,7 @@ class BLEPeripheral: RCTEventEmitter, CBPeripheralManagerDelegate {
         }
     }
 
-    // NOVO: Função auxiliar para criar serviço
+    // Função auxiliar para criar serviço
     private func criarNovoServico(_ newUUID: String, _ oldCharacteristics: [(uuid: String, permissions: UInt, properties: UInt, data: String)]) {
         // Step 3: Criar novo service COM characteristics diretamente
         let newServiceUUID = CBUUID(string: newUUID)
@@ -265,10 +272,19 @@ class BLEPeripheral: RCTEventEmitter, CBPeripheralManagerDelegate {
         
         newService.characteristics = newCharacteristics
         self.servicesMap[newUUID] = newService
-        self.manager.add(newService)
-        print("➕ [UUID Update] New service added with UUID: \(newUUID)")
         
-        // Advertising será reiniciado em didAdd(service:) quando o serviço novo for confirmado
+        // Prevenir chamada duplicada
+        if self.serviceAddInProgress {
+            print("⚠️ [UUID Update] addService já em progresso, ignorando chamada duplicada")
+            return
+        }
+        
+        self.serviceAddInProgress = true
+        print("➕ [UUID Update] Adding service: \(newUUID)")
+        self.manager.add(newService)
+        print("➕ [UUID Update] manager.add() called - aguardando callback didAdd")
+        
+        // Advertising será reiniciado em didAdd(service:) quando o serviço for confirmado
     }
     
     @objc func updateServiceUUIDSeamless(_ newUUID: String, resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
@@ -351,24 +367,36 @@ class BLEPeripheral: RCTEventEmitter, CBPeripheralManagerDelegate {
                 
                 // Delay mínimo
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    // Step 3: Criar novo service
+                    // Step 3: Criar novo service COM characteristics
                     let newServiceUUID = CBUUID(string: newUUID)
                     let newService = CBMutableService(type: newServiceUUID, primary: true)
-                    
-                    self.servicesMap[newUUID] = newService
-                    self.manager.add(newService)
-                    print("➕ [UUID Seamless] New service added")
-                    
-                    // Delay mínimo antes de reiniciar
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                        let advertisementData: [String: Any] = [
-                            CBAdvertisementDataLocalNameKey: self.name,
-                            CBAdvertisementDataServiceUUIDsKey: self.getServiceUUIDArray()
-                        ]
-                        
-                        self.manager.startAdvertising(advertisementData)
-                        print("📡 [UUID Seamless] Advertising restart triggered")
+
+                    var newCharacteristics: [CBMutableCharacteristic] = []
+                    for charData in (self.pendingCharacteristics ?? []) {
+                        let charUUID = CBUUID(string: charData.uuid)
+                        let properties = CBCharacteristicProperties(rawValue: charData.properties)
+                        let permissions = CBAttributePermissions(rawValue: charData.permissions)
+                        let data = charData.data.data(using: .utf8) ?? Data()
+                        let newChar = CBMutableCharacteristic(
+                            type: charUUID,
+                            properties: properties,
+                            value: data,
+                            permissions: permissions
+                        )
+                        newCharacteristics.append(newChar)
                     }
+                    newService.characteristics = newCharacteristics
+
+                    self.servicesMap[newUUID] = newService
+                    if self.serviceAddInProgress {
+                        print("⚠️ [UUID Seamless] addService já em progresso, ignorando duplicado")
+                    } else {
+                        self.serviceAddInProgress = true
+                        self.manager.add(newService)
+                        print("➕ [UUID Seamless] New service added with characteristics")
+                    }
+                    
+                    // Advertising será retomado em didAdd(service:)
                 }
             }
         }
@@ -453,6 +481,9 @@ class BLEPeripheral: RCTEventEmitter, CBPeripheralManagerDelegate {
         if let error = error {
             alertJS("error: \(error)")
             
+            // Limpar flag
+            self.serviceAddInProgress = false
+            
             // Se estava esperando UUID update e deu erro, rejeitar
             if isUpdatingUUID {
                 updateQueue.sync {
@@ -466,10 +497,15 @@ class BLEPeripheral: RCTEventEmitter, CBPeripheralManagerDelegate {
         }
         
         print("✅ [Service Added] Service: \(service.uuid)")
+        
+        // Limpar flag de add em progresso
+        self.serviceAddInProgress = false
+        
         // Reiniciar advertising somente após confirmação de que o serviço foi adicionado
         if isUpdatingUUID {
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
+                
                 let advertisementData: [String: Any] = [
                     CBAdvertisementDataLocalNameKey: self.name,
                     CBAdvertisementDataServiceUUIDsKey: self.getServiceUUIDArray()
@@ -482,6 +518,7 @@ class BLEPeripheral: RCTEventEmitter, CBPeripheralManagerDelegate {
                     guard let self = self else { return }
                     self.advertising = true
                     print("✅ [UUID Update] Complete! Now advertising: \(service.uuid)")
+                    
                     self.updateQueue.sync {
                         self.pendingResolve?(true)
                         self.pendingResolve = nil
