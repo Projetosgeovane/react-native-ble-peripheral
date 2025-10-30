@@ -1,4 +1,5 @@
 //  Created by Eskel on 12/12/2018
+//  Updated with crash fixes - October 2025
 
 import Foundation
 import CoreBluetooth
@@ -44,7 +45,6 @@ class BLEPeripheral: RCTEventEmitter, CBPeripheralManagerDelegate {
     @objc(addService:primary:)
     func addService(_ uuid: String, primary: Bool) {
         // CRITICAL FIX: All CoreBluetooth operations MUST be on main thread to prevent crashes
-        // The crash occurs because manager.add() and manager.remove() are called from background threads
         DispatchQueue.main.async { [weak self] in
             guard let self = self else {
                 print("❌ BLEPeripheral was deallocated")
@@ -196,7 +196,6 @@ class BLEPeripheral: RCTEventEmitter, CBPeripheralManagerDelegate {
         // IMPORTANT: All CoreBluetooth operations MUST be on main thread
         DispatchQueue.main.async { [weak self] in
             guard let self = self else {
-                // Se self foi deallocated, apenas rejeitar
                 reject("DEALLOCATED", "BLEPeripheral was deallocated", nil)
                 return
             }
@@ -206,87 +205,117 @@ class BLEPeripheral: RCTEventEmitter, CBPeripheralManagerDelegate {
             self.advertising = false
             print("🛑 [UUID Update] Advertising stopped")
             
-            // Delay para garantir que advertising parou
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            // CORREÇÃO: Aumentar delay de 0.4s para 1.0s
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
                 guard let self = self else { 
                     print("⚠️ [UUID Update] Self deallocated, aborting")
                     return 
                 }
                 
-                // Step 2: Remove all services (mais seguro que remover individualmente)
+                // Step 2: Remove all services
                 print("🗑️ [UUID Update] Calling removeAllServices()")
                 self.manager.removeAllServices()
+                self.servicesMap.removeAll()
 
-                // Aguardar para garantir que o CoreBluetooth processou a remoção
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+                // CORREÇÃO: Aumentar delay de 0.4s para 1.0s
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
                     guard let self = self else { return }
                     
-                    // Limpar o map
-                    self.servicesMap.removeAll()
+                    // NOVO: Verificar se serviços foram realmente removidos
+                    let servicesAfterRemoval = self.manager.services ?? []
+                    if !servicesAfterRemoval.isEmpty {
+                        print("⚠️ [UUID Update] Ainda há \(servicesAfterRemoval.count) serviços, aguardando mais...")
+                        // Aguardar mais tempo e tentar novamente
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                            guard let self = self else { return }
+                            
+                            let stillRemaining = self.manager.services ?? []
+                            if !stillRemaining.isEmpty {
+                                print("❌ [UUID Update] ERRO: Serviços ainda presentes após 2s")
+                                self.updateQueue.sync {
+                                    self.pendingReject?("SERVICES_NOT_REMOVED", "Failed to remove services", nil)
+                                    self.pendingResolve = nil
+                                    self.pendingReject = nil
+                                    self.isUpdatingUUID = false
+                                }
+                                return
+                            }
+                            
+                            // Continuar com criação do serviço
+                            self.criarNovoServico(newUUID, oldCharacteristics)
+                        }
+                        return
+                    }
+                    
                     print("✅ [UUID Update] Services removed and map cleared")
                     
-                    // Delay maior para garantir limpeza completa antes de criar novo service
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                    // CORREÇÃO: Aumentar delay de 0.3s para 0.8s
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
                         guard let self = self else { 
                             print("⚠️ [UUID Update] Self deallocated, aborting")
                             return 
                         }
                         
-                        // Step 3: Criar novo service COM characteristics diretamente
-                        let newServiceUUID = CBUUID(string: newUUID)
-                        let newService = CBMutableService(type: newServiceUUID, primary: true)
-                        
-                        // Adicionar characteristics diretamente SEM esperar callback
-                        var newCharacteristics: [CBMutableCharacteristic] = []
-                        for charData in oldCharacteristics {
-                            let charUUID = CBUUID(string: charData.uuid)
-                            let properties = CBCharacteristicProperties(rawValue: charData.properties)
-                            let permissions = CBAttributePermissions(rawValue: charData.permissions)
-                            let data = charData.data.data(using: .utf8) ?? Data()
-                            
-                            let newChar = CBMutableCharacteristic(
-                                type: charUUID,
-                                properties: properties,
-                                value: data,
-                                permissions: permissions
-                            )
-                            newCharacteristics.append(newChar)
-                            print("➕ [UUID Update] Created characteristic: \(charData.uuid)")
-                        }
-                        
-                        newService.characteristics = newCharacteristics
-                        self.servicesMap[newUUID] = newService
-                        self.manager.add(newService)
-                        print("➕ [UUID Update] New service added with UUID: \(newUUID)")
-                        
-                        // Delay antes de reiniciar advertising
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
-                            guard let self = self else { return }
-                            
-                            let advertisementData: [String: Any] = [
-                                CBAdvertisementDataLocalNameKey: self.name,
-                                CBAdvertisementDataServiceUUIDsKey: self.getServiceUUIDArray()
-                            ]
-                            
-                            print("📡 [UUID Update] Restarting advertising with new UUID: \(newUUID)")
-                            self.manager.startAdvertising(advertisementData)
-                            
-                            // Não esperar callback, resolver direto
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-                                guard let self = self else { return }
-                                self.advertising = true
-                                print("✅ [UUID Update] Complete! New UUID: \(newUUID)")
-                                
-                                // Resolver promise
-                                updateQueue.sync {
-                                    self.pendingResolve?(true)
-                                    self.pendingResolve = nil
-                                    self.pendingReject = nil
-                                    self.isUpdatingUUID = false
-                                }
-                            }
-                        }
+                        self.criarNovoServico(newUUID, oldCharacteristics)
                     }
+                }
+            }
+        }
+    }
+
+    // NOVO: Função auxiliar para criar serviço
+    private func criarNovoServico(_ newUUID: String, _ oldCharacteristics: [(uuid: String, permissions: UInt, properties: UInt, data: String)]) {
+        // Step 3: Criar novo service COM characteristics diretamente
+        let newServiceUUID = CBUUID(string: newUUID)
+        let newService = CBMutableService(type: newServiceUUID, primary: true)
+        
+        // Adicionar characteristics diretamente
+        var newCharacteristics: [CBMutableCharacteristic] = []
+        for charData in oldCharacteristics {
+            let charUUID = CBUUID(string: charData.uuid)
+            let properties = CBCharacteristicProperties(rawValue: charData.properties)
+            let permissions = CBAttributePermissions(rawValue: charData.permissions)
+            let data = charData.data.data(using: .utf8) ?? Data()
+            
+            let newChar = CBMutableCharacteristic(
+                type: charUUID,
+                properties: properties,
+                value: data,
+                permissions: permissions
+            )
+            newCharacteristics.append(newChar)
+            print("➕ [UUID Update] Created characteristic: \(charData.uuid)")
+        }
+        
+        newService.characteristics = newCharacteristics
+        self.servicesMap[newUUID] = newService
+        self.manager.add(newService)
+        print("➕ [UUID Update] New service added with UUID: \(newUUID)")
+        
+        // CORREÇÃO: Aumentar delay de 0.4s para 1.0s
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            guard let self = self else { return }
+            
+            let advertisementData: [String: Any] = [
+                CBAdvertisementDataLocalNameKey: self.name,
+                CBAdvertisementDataServiceUUIDsKey: self.getServiceUUIDArray()
+            ]
+            
+            print("📡 [UUID Update] Restarting advertising with new UUID: \(newUUID)")
+            self.manager.startAdvertising(advertisementData)
+            
+            // CORREÇÃO: Aumentar delay de 0.3s para 0.8s
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+                guard let self = self else { return }
+                self.advertising = true
+                print("✅ [UUID Update] Complete! New UUID: \(newUUID)")
+                
+                // Resolver promise
+                self.updateQueue.sync {
+                    self.pendingResolve?(true)
+                    self.pendingResolve = nil
+                    self.pendingReject = nil
+                    self.isUpdatingUUID = false
                 }
             }
         }
@@ -429,8 +458,7 @@ class BLEPeripheral: RCTEventEmitter, CBPeripheralManagerDelegate {
     //// EVENTS
 
     // Respond to Read request
-    func peripheralManager(peripheral: CBPeripheralManager, didReceiveReadRequest request: CBATTRequest)
-    {
+    func peripheralManager(peripheral: CBPeripheralManager, didReceiveReadRequest request: CBATTRequest) {
         let characteristic = getCharacteristic(request.characteristic.uuid)
         if let char = characteristic {
             request.value = char.value
@@ -442,10 +470,8 @@ class BLEPeripheral: RCTEventEmitter, CBPeripheralManagerDelegate {
     }
 
     // Respond to Write request
-    func peripheralManager(peripheral: CBPeripheralManager, didReceiveWriteRequests requests: [CBATTRequest])
-    {
-        for request in requests
-        {
+    func peripheralManager(peripheral: CBPeripheralManager, didReceiveWriteRequests requests: [CBATTRequest]) {
+        for request in requests {
             let characteristic = getCharacteristic(request.characteristic.uuid)
             if let char = characteristic as? CBMutableCharacteristic {
                 char.value = request.value
@@ -594,7 +620,6 @@ class BLEPeripheral: RCTEventEmitter, CBPeripheralManagerDelegate {
     @objc override static func moduleName() -> String! {
         return "BLEPeripheral"
     }
-    
 }
 
 @available(iOS 10.0, *)
@@ -607,6 +632,7 @@ extension CBManagerState: CustomStringConvertible {
         case .unauthorized: return ".unauthorized"
         case .unknown: return ".unknown"
         case .unsupported: return ".unsupported"
+        @unknown default: return ".unknown"
         }
     }
 }
