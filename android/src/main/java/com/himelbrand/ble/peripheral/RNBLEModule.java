@@ -13,6 +13,8 @@ import android.bluetooth.le.AdvertiseData;
 import android.bluetooth.le.AdvertiseSettings;
 import android.bluetooth.le.BluetoothLeAdvertiser;
 import android.content.Context;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.ParcelUuid;
 import android.util.Log;
 
@@ -49,6 +51,8 @@ public class RNBLEModule extends ReactContextBaseJavaModule{
     String name;
     boolean advertising;
     private Context context;
+    Integer manufacturerId;
+    byte[] manufacturerData;
 
     public RNBLEModule(ReactApplicationContext reactContext) {
         super(reactContext);
@@ -57,6 +61,8 @@ public class RNBLEModule extends ReactContextBaseJavaModule{
         this.servicesMap = new HashMap<String, BluetoothGattService>();
         this.advertising = false;
         this.name = "RN_BLE";
+        this.manufacturerId = null;
+        this.manufacturerData = null;
     }
 
     @Override
@@ -68,6 +74,21 @@ public class RNBLEModule extends ReactContextBaseJavaModule{
     public void setName(String name) {
         this.name = name;
         Log.i("RNBLEModule", "name set to " + name);
+    }
+
+    @ReactMethod
+    public void setManufacturerData(Integer manufacturerId, ReadableArray data) {
+        this.manufacturerId = manufacturerId;
+        if (data != null && data.size() > 0) {
+            this.manufacturerData = new byte[data.size()];
+            for (int i = 0; i < data.size(); i++) {
+                this.manufacturerData[i] = (byte) data.getInt(i);
+            }
+            Log.i("RNBLEModule", "Manufacturer data set - ID: " + manufacturerId + ", Size: " + manufacturerData.length);
+        } else {
+            this.manufacturerData = null;
+            Log.i("RNBLEModule", "Manufacturer data cleared");
+        }
     }
 
     @ReactMethod
@@ -165,6 +186,11 @@ public class RNBLEModule extends ReactContextBaseJavaModule{
         for (BluetoothGattService service : this.servicesMap.values()) {
             dataBuilder.addServiceUuid(new ParcelUuid(service.getUuid()));
         }
+        // Add manufacturer data if set
+        if (this.manufacturerId != null && this.manufacturerData != null) {
+            dataBuilder.addManufacturerData(this.manufacturerId, this.manufacturerData);
+            Log.i("RNBLEModule", "Added manufacturer data to advertisement - ID: " + this.manufacturerId);
+        }
         AdvertiseData data = dataBuilder.build();
         Log.i("RNBLEModule", data.toString());
 
@@ -220,6 +246,65 @@ public class RNBLEModule extends ReactContextBaseJavaModule{
     @ReactMethod
     public void isAdvertising(Promise promise){
         promise.resolve(this.advertising);
+    }
+
+    @ReactMethod
+    public void updateManufacturerData(Integer manufacturerId, ReadableArray data, final Promise promise) {
+        // Update manufacturer data
+        setManufacturerData(manufacturerId, data);
+        
+        // If currently advertising, restart with new data
+        if (this.advertising && advertiser != null) {
+            // Stop current advertising
+            advertiser.stopAdvertising(advertisingCallback);
+            
+            // Wait a bit before restarting (Android requirement) - use Handler to avoid blocking
+            Handler handler = new Handler(Looper.getMainLooper());
+            handler.postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    // Restart advertising with new data
+                    AdvertiseSettings settings = new AdvertiseSettings.Builder()
+                            .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
+                            .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)
+                            .setConnectable(true)
+                            .build();
+
+                    AdvertiseData.Builder dataBuilder = new AdvertiseData.Builder()
+                            .setIncludeDeviceName(true);
+                    for (BluetoothGattService service : RNBLEModule.this.servicesMap.values()) {
+                        dataBuilder.addServiceUuid(new ParcelUuid(service.getUuid()));
+                    }
+                    // Add updated manufacturer data
+                    if (RNBLEModule.this.manufacturerId != null && RNBLEModule.this.manufacturerData != null) {
+                        dataBuilder.addManufacturerData(RNBLEModule.this.manufacturerId, RNBLEModule.this.manufacturerData);
+                    }
+                    AdvertiseData newData = dataBuilder.build();
+
+                    RNBLEModule.this.advertisingCallback = new AdvertiseCallback() {
+                        @Override
+                        public void onStartSuccess(AdvertiseSettings settingsInEffect) {
+                            super.onStartSuccess(settingsInEffect);
+                            RNBLEModule.this.advertising = true;
+                            promise.resolve("Success, Manufacturer data updated and advertising restarted");
+                        }
+
+                        @Override
+                        public void onStartFailure(int errorCode) {
+                            RNBLEModule.this.advertising = false;
+                            Log.e("RNBLEModule", "Advertising onStartFailure after update: " + errorCode);
+                            promise.reject("UPDATE_FAILED", "Failed to restart advertising with new manufacturer data: " + errorCode);
+                            super.onStartFailure(errorCode);
+                        }
+                    };
+
+                    RNBLEModule.this.advertiser.startAdvertising(settings, newData, RNBLEModule.this.advertisingCallback);
+                }
+            }, 100);
+        } else {
+            // Not advertising, just update the data for next start
+            promise.resolve("Manufacturer data updated (not advertising)");
+        }
     }
 
 }

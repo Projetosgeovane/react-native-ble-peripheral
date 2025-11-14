@@ -10,6 +10,7 @@ A simulator for a BLE peripheral, to help with testing BLE apps without an actua
 - ✅ Start/stop advertising
 - ✅ Send notifications to connected devices
 - ✅ Handle read/write requests
+- ✅ Manufacturer Data support (Android only)
 
 ## Requirements
 
@@ -211,6 +212,63 @@ BLEPeripheral.setName(name:string)
 This method sets the name of the device broadcast, before calling `start`.
 ```javascript
 BLEPeripheral.setName('RNBLETEST')
+```
+
+#### Manufacturer Data (Android only)
+BLEPeripheral.setManufacturerData(manufacturerId:number, data:number[])
+
+This method sets the manufacturer data to be included in BLE advertisements. Must be called before `start()` to include manufacturer data in the initial advertisement.
+
+**Parameters:**
+- `manufacturerId`: Manufacturer ID (e.g., 0xFFFF for testing, 0x004C for Apple, etc.)
+- `data`: Array of bytes (numbers 0-255) representing the manufacturer data
+
+```javascript
+// Set manufacturer data before starting advertising
+const manufacturerId = 0xFFFF; // Test manufacturer ID
+const manufacturerData = [0x01, 0x02, 0x03, 0x04, 0x05];
+BLEPeripheral.setManufacturerData(manufacturerId, manufacturerData);
+
+// Then start advertising (will include manufacturer data)
+BLEPeripheral.start();
+```
+
+#### Update Manufacturer Data (Android only)
+BLEPeripheral.updateManufacturerData(manufacturerId:number, data:number[])
+
+This method updates the manufacturer data and automatically restarts advertising with the new data. Useful for updating manufacturer data while the device is already advertising.
+
+```javascript
+// Update manufacturer data while advertising
+const newManufacturerData = [0xAA, 0xBB, 0xCC, 0xDD];
+BLEPeripheral.updateManufacturerData(0xFFFF, newManufacturerData)
+  .then(result => {
+    console.log('Manufacturer data updated:', result);
+  })
+  .catch(error => {
+    console.error('Failed to update manufacturer data:', error);
+  });
+```
+
+**Note:** Manufacturer data is only supported on Android. On iOS, these methods will have no effect.
+
+**Example - Gateway with Manufacturer Data:**
+```javascript
+// Setup gateway with manufacturer data
+BLEPeripheral.setName('My BLE Gateway');
+BLEPeripheral.setManufacturerData(0xFFFF, [0x01, 0x02, 0x03]);
+BLEPeripheral.addService('12345678-1234-1234-1234-123456789ABC', true);
+BLEPeripheral.start();
+
+// Later, update manufacturer data with gateway information
+const gatewayId = 1234;
+const status = 1; // active
+const gatewayData = [
+  (gatewayId >> 8) & 0xFF,  // High byte
+  gatewayId & 0xFF,          // Low byte
+  status
+];
+BLEPeripheral.updateManufacturerData(0xFFFF, gatewayData);
 ```
 
 DOCs and project is under development 

@@ -43,6 +43,48 @@ class BLEPeripheralManager {
     return this.module.setName(name);
   }
 
+  setManufacturerData(manufacturerId, data) {
+    if (Platform.OS !== 'android') {
+      return Promise.reject(new Error('Manufacturer data is only supported on Android'));
+    }
+    if (typeof manufacturerId !== 'number') {
+      return Promise.reject(new Error('Manufacturer ID must be a number'));
+    }
+    if (!Array.isArray(data)) {
+      return Promise.reject(new Error('Manufacturer data must be an array'));
+    }
+    // Convert array to ReadableArray format (array of numbers 0-255)
+    const dataArray = data.map(byte => {
+      const num = typeof byte === 'number' ? byte : parseInt(byte, 10);
+      if (isNaN(num) || num < 0 || num > 255) {
+        throw new Error('Manufacturer data bytes must be numbers between 0 and 255');
+      }
+      return num;
+    });
+    return this.module.setManufacturerData(manufacturerId, dataArray);
+  }
+
+  updateManufacturerData(manufacturerId, data) {
+    if (Platform.OS !== 'android') {
+      return Promise.reject(new Error('Manufacturer data is only supported on Android'));
+    }
+    if (typeof manufacturerId !== 'number') {
+      return Promise.reject(new Error('Manufacturer ID must be a number'));
+    }
+    if (!Array.isArray(data)) {
+      return Promise.reject(new Error('Manufacturer data must be an array'));
+    }
+    // Convert array to ReadableArray format (array of numbers 0-255)
+    const dataArray = data.map(byte => {
+      const num = typeof byte === 'number' ? byte : parseInt(byte, 10);
+      if (isNaN(num) || num < 0 || num > 255) {
+        throw new Error('Manufacturer data bytes must be numbers between 0 and 255');
+      }
+      return num;
+    });
+    return this.module.updateManufacturerData(manufacturerId, dataArray);
+  }
+
   isAdvertising() {
     return this.module.isAdvertising();
   }
