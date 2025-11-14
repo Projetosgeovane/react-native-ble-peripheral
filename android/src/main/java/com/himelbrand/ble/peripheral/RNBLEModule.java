@@ -181,18 +181,41 @@ public class RNBLEModule extends ReactContextBaseJavaModule{
                 .build();
 
 
-        AdvertiseData.Builder dataBuilder = new AdvertiseData.Builder()
-                .setIncludeDeviceName(true);
+        AdvertiseData.Builder dataBuilder = new AdvertiseData.Builder();
+        
+        // BLE advertising has a 31 byte limit
+        // Manufacturer data structure: 1 byte (type) + 1 byte (length) + 2 bytes (company ID) + data bytes
+        // For large manufacturer data (>15 bytes), exclude device name to ensure it fits
+        boolean includeDeviceName = true;
+        if (this.manufacturerId != null && this.manufacturerData != null) {
+            // Manufacturer data overhead: 4 bytes (type + length + company ID)
+            // Manufacturer data payload: manufacturerData.length
+            // Service UUIDs overhead: ~3-19 bytes per UUID
+            // Device name overhead: 3 bytes + name length
+            // If manufacturer data is large, exclude device name to ensure it fits
+            if (this.manufacturerData.length > 15) {
+                includeDeviceName = false;
+                Log.w("RNBLEModule", "Device name excluded from advertising to fit large manufacturer data (" + 
+                      this.manufacturerData.length + " bytes). Device name is still set via setName() and available via GATT.");
+            }
+        }
+        
+        dataBuilder.setIncludeDeviceName(includeDeviceName);
+        
         for (BluetoothGattService service : this.servicesMap.values()) {
             dataBuilder.addServiceUuid(new ParcelUuid(service.getUuid()));
         }
+        
         // Add manufacturer data if set
         if (this.manufacturerId != null && this.manufacturerData != null) {
             dataBuilder.addManufacturerData(this.manufacturerId, this.manufacturerData);
-            Log.i("RNBLEModule", "Added manufacturer data to advertisement - ID: " + this.manufacturerId);
+            Log.i("RNBLEModule", "Added manufacturer data to advertisement - ID: 0x" + 
+                  Integer.toHexString(this.manufacturerId).toUpperCase() + 
+                  ", Size: " + this.manufacturerData.length + " bytes");
         }
+        
         AdvertiseData data = dataBuilder.build();
-        Log.i("RNBLEModule", data.toString());
+        Log.i("RNBLEModule", "Advertising data built. Include device name: " + includeDeviceName);
 
         advertisingCallback = new AdvertiseCallback() {
             @Override
@@ -270,14 +293,30 @@ public class RNBLEModule extends ReactContextBaseJavaModule{
                             .setConnectable(true)
                             .build();
 
-                    AdvertiseData.Builder dataBuilder = new AdvertiseData.Builder()
-                            .setIncludeDeviceName(true);
+                    AdvertiseData.Builder dataBuilder = new AdvertiseData.Builder();
+                    
+                    // Same logic as start method - exclude device name for large manufacturer data
+                    boolean includeDeviceName = true;
+                    if (RNBLEModule.this.manufacturerId != null && RNBLEModule.this.manufacturerData != null) {
+                        if (RNBLEModule.this.manufacturerData.length > 15) {
+                            includeDeviceName = false;
+                            Log.w("RNBLEModule", "Device name excluded from advertising to fit large manufacturer data (" + 
+                                  RNBLEModule.this.manufacturerData.length + " bytes). Device name is still set via setName() and available via GATT.");
+                        }
+                    }
+                    
+                    dataBuilder.setIncludeDeviceName(includeDeviceName);
+                    
                     for (BluetoothGattService service : RNBLEModule.this.servicesMap.values()) {
                         dataBuilder.addServiceUuid(new ParcelUuid(service.getUuid()));
                     }
+                    
                     // Add updated manufacturer data
                     if (RNBLEModule.this.manufacturerId != null && RNBLEModule.this.manufacturerData != null) {
                         dataBuilder.addManufacturerData(RNBLEModule.this.manufacturerId, RNBLEModule.this.manufacturerData);
+                        Log.i("RNBLEModule", "Updated manufacturer data - ID: 0x" + 
+                              Integer.toHexString(RNBLEModule.this.manufacturerId).toUpperCase() + 
+                              ", Size: " + RNBLEModule.this.manufacturerData.length + " bytes");
                     }
                     AdvertiseData newData = dataBuilder.build();
 

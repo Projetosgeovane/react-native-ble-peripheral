@@ -271,6 +271,68 @@ const gatewayData = [
 BLEPeripheral.updateManufacturerData(0xFFFF, gatewayData);
 ```
 
+**Important Notes about Manufacturer Data Size:**
+- BLE advertising has a **31 byte limit** for the total advertising data
+- Manufacturer data structure uses: 4 bytes overhead (type + length + company ID) + your data bytes
+- For manufacturer data larger than 15 bytes, the device name will be **automatically excluded** from the advertising packet to ensure the manufacturer data fits
+- The device name is still set via `setName()` and remains available via GATT connection
+- Service UUIDs also consume space in the advertising packet
+
+**Example - Large Manufacturer Data (21 bytes):**
+```javascript
+// Format: <0D6C> AB AA BBCC DDEE FF 77 7A17 6900 0000 00 00 00
+// - 0D6C: Company ID (2 bytes)
+// - AB: Packet ID (1 byte)
+// - AA BBCC DDEE FF: Device name (6 bytes)
+// - 77 7A17 6900 0000 00: Timestamp Unix UTC Seconds (10 bytes)
+// - 00: Alert (1 byte)
+// - 00: Temperature Profile (1 byte)
+
+const companyId = 0x0D6C;
+const packetId = 0xAB;
+const deviceNameBytes = [0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF];
+
+// Helper function to convert timestamp to 10 bytes (little-endian)
+function timestampToBytes(timestamp) {
+  const bytes = [];
+  let value = timestamp;
+  for (let i = 0; i < 10; i++) {
+    bytes.push(value & 0xFF);
+    value = Math.floor(value / 256);
+  }
+  return bytes;
+}
+
+const timestamp = Math.floor(Date.now() / 1000);
+const timestampBytes = timestampToBytes(timestamp);
+
+const manufacturerData = [
+  packetId,
+  ...deviceNameBytes,    // 6 bytes
+  ...timestampBytes,     // 10 bytes
+  0x00,                  // Alert
+  0x00                   // Temperature Profile
+]; // Total: 21 bytes
+
+BLEPeripheral.setManufacturerData(companyId, manufacturerData);
+BLEPeripheral.addService('12345678-1234-1234-1234-123456789ABC', true);
+BLEPeripheral.start();
+
+// Update timestamp every 30 seconds
+setInterval(() => {
+  const newTimestamp = Math.floor(Date.now() / 1000);
+  const newTimestampBytes = timestampToBytes(newTimestamp);
+  const updatedManufacturerData = [
+    packetId,
+    ...deviceNameBytes,
+    ...newTimestampBytes,
+    0x00,  // Alert
+    0x00   // Temperature Profile
+  ];
+  BLEPeripheral.updateManufacturerData(companyId, updatedManufacturerData);
+}, 30000);
+```
+
 DOCs and project is under development 
 Any help would be welcome...
 feel free to contact me
